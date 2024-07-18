@@ -2,11 +2,13 @@
   "name": "infra-hw",
   "version": "1.0.0",
   "scripts": {
-    "start": "nodemon ./src/server/index.ts",
+    "start": "nodemon --watch ./src/server --exec ts-node ./src/server/index.ts",
     "build": "webpack --mode=production --node-env=production",
     "watch": "webpack --watch",
     "test": "jest",
-    "lint": "eslint ./src"
+    "lint": "eslint ./src",
+    "build:docker": "npm run build && docker build -t shir-infra .",
+    "start:docker": "docker run -p 3000:3000 shir-infra:latest"
   },
   "dependencies": {
     "@bem-react/classname": "^1.6.0",
