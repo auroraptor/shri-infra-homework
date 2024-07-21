@@ -19,7 +19,7 @@ jobs:
       USER: ${{ github.triggering_actor }}
       RUN: ${{ github.run_number }}
       RELEASE: ${{ github.event.inputs.release_version }}
-      REGISTRY: cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app
+      REGISTRY: cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry
       YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
       SERVER_IP: ${{ secrets.SERVER_IP }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -29,8 +29,7 @@ jobs:
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
-        with:
-          node-version: '20'
+
 
       - name: Pull Docker image
         run: |
