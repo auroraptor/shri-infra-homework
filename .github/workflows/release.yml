@@ -20,7 +20,7 @@ jobs:
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
-
+    
       - name: Login to Yandex Container Registry
         run: |
           echo ${{ secrets.YC_OAUTH_TOKEN }} | docker login --username oauth --password-stdin cr.yandex
