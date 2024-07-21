@@ -12,46 +12,97 @@ permissions:
   issues: write
 
 jobs:
-  deploy:
+  lint:
     runs-on: ubuntu-latest
-
-    env:
-      USER: ${{ github.triggering_actor }}
-      RUN: ${{ github.run_number }}
-      RELEASE: ${{ github.event.inputs.release_version }}
-      REGISTRY: cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry
-      YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
-      SERVER_IP: ${{ secrets.SERVER_IP }}
-      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-
     steps:
       - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: npm ci
+      - run: npm run lint
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: npm ci
+      - run: npm run test
 
-
-      - name: Pull Docker image
+  create_release_branch:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: Create release branch
         run: |
-          docker login --username oauth --password $YC_OAUTH_TOKEN cr.yandex
-          docker pull $REGISTRY:$RELEASE_latest
+          git checkout -b release/${{ github.run_number }}
+          git push origin release/${{ github.run_number }}
 
-      - name: Deploy Docker image
+  create_release_docker:
+    needs: [create_release_branch]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/${{github.run_number}}
+
+      - name: Login to Yandex Container Registry
         run: |
-          ssh -i <(echo "$SSH_PRIVATE_KEY") -o StrictHostKeyChecking=no admin@$SERVER_IP "
-          docker login cr.yandex -u oauth --password-stdin <<< $YC_OAUTH_TOKEN &&
-          docker pull $REGISTRY:$RELEASE_latest &&
-          docker run -d -p 80:3000 $REGISTRY:$RELEASE_latest
-          "
+          echo ${{ secrets.YC_OAUTH_TOKEN }} | docker login --username oauth --password-stdin cr.yandex
+
+      - name: Create Docker image
+        run: |
+          docker build -t cr.yandex/${{secrets.YANDEX_REGISTRY_ID}}/my-first-registry:${{ github.run_number }} .
+          docker push cr.yandex/${{secrets.YANDEX_REGISTRY_ID}}/my-first-registry:${{ github.run_number }}
+
+      - name: Create Docker image latest
+        run: |
+          docker build -t cr.yandex/${{secrets.YANDEX_REGISTRY_ID}}/my-first-registry:${{ github.run_number }}_latest .
+          docker push cr.yandex/${{secrets.YANDEX_REGISTRY_ID}}/my-first-registry:${{ github.run_number }}_latest
+
+  create_tag:
+    needs: [create_release_branch]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/${{github.run_number}}
+      - name: Push tag
+        uses: EndBug/latest-tag@latest
+        with:
+          tag-name: ${{github.run_number}}
+
+  create_issue:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - name: Set current date as env variable
+        run: echo "NOW=$(date +'%Y-%m-%dT%H:%M:%S')" >> $GITHUB_ENV
 
       - name: Create GitHub issue
         run: |
-          touch $FILE
-          echo "**Version:** $RELEASE  " >> $FILE
-          echo "**Date:** $(date +%Y-%m-%d)  " >> $FILE
-          echo "**Triggering actor:** $USER  " >> $FILE
-          echo "**Docker image:** $REGISTRY:$RELEASE_fix$RUN  " >> $FILE
-          gh issue create --title "Version $RELEASE deployment" --body-file $FILE
-          rm $FILE
-        env:
-          FILE: issue_temp.txt
+          touch issue_temp.txt
+          echo "**Version:** ${{ github.run_number }}" >> issue_temp.txt
+          echo "**Date:** ${{ env.NOW }}" >> issue_temp.txt
+          echo "**Triggering actor:** ${{ github.triggering_actor }}" >> issue_temp.txt
+          echo "**Docker image:** cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry:${{ github.run_number }}" >> issue_temp.txt
+          gh issue create --title "Version ${{ github.run_number }} deployment" --body-file issue_temp.txt
+          rm issue_temp.txt
+
+  deploy:
+    needs: [create_release_docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSH
+        run: |
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > key.pem
+          chmod 600 key.pem
+
+      - name: Deploy Docker image
+        run: |
+          ssh -i key.pem -o StrictHostKeyChecking=no admin@${{ secrets.SERVER_IP }} "
+          echo ${{ secrets.YC_OAUTH_TOKEN }} | docker login --username oauth --password-stdin cr.yandex &&
+          docker pull cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry:${{ github.run_number }}_latest &&
+          docker run -d -p 80:3000 cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry:${{ github.run_number }}_latest
+          "
