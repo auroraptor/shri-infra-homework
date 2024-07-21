@@ -58,7 +58,7 @@ jobs:
 
       - name: Create Docker image latest
         run: |
-          docker build -t cr.yandex/${{secrets.YANДEX_REGISTRY_ID}}/my-first-registry:${{ github.run_number }}_latest .
+          docker build -t cr.yandex/${{secrets.YANDEX_REGISTRY_ID}}/my-first-registry:${{ github.run_number }}_latest .
           docker push cr.yandex/${{secrets.YANDEX_REGISTRY_ID}}/my-first-registry:${{ github.run_number }}_latest
 
   create_tag:
@@ -77,6 +77,8 @@ jobs:
     needs: [lint, test]
     runs-on: ubuntu-latest
     steps:
+      - name: Check out code
+        uses: actions/checkout@v3
       - name: Set current date as env variable
         run: echo "NOW=$(date +'%Y-%m-%dT%H:%M:%S')" >> $GITHUB_ENV
 
@@ -107,5 +109,5 @@ jobs:
           ssh -i key.pem -o StrictHostKeyChecking=no admin@${{ secrets.SERVER_IP }} "
           echo ${{ secrets.YC_OAUTH_TOKEN }} | docker login --username oauth --password-stdin cr.yandex &&
           docker pull cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry:${{ github.run_number }}_latest &&
-          docker run -d -p 80:3000 cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry:${{ github.run_number }}_latest
+          docker run -d -p 8080:3000 cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry:${{ github.run_number }}_latest
           "
