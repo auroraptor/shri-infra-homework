@@ -7,63 +7,81 @@ on:
         description: 'Release version'
         required: true
 
-jobs:
-  fix:
-    runs-on: ubuntu-latest
+permissions:
+  contents: write
+  issues: write
 
+jobs:
+  lint:
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Node.js
-      uses: actions/setup-node@v2
-      with:
-        node-version: '20'
-    - run: npm install
-    - run: npm run lint
-    - run: npm test
-    - name: Build Docker image
-      run: docker build -t cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.event.inputs.release_version }}_fix${{ github.run_number }} -t cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.event.inputs.release_version }}_latest .
-    - name: Push Docker image
-      run: |
-        echo ${{ secrets.YANDEX_TOKEN }} | docker login cr.yandex -u oauth --password-stdin
-        docker push cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.event.inputs.release_version }}_fix${{ github.run_number }}
-        docker push cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.event.inputs.release_version }}_latest
-    - name: Create fix tag
-      run: |
-        git tag -a v${{ github.event.inputs.release_version }}_fix${{ github.run_number }} -m "Fix release ${{ github.event.inputs.release_version }}"
-        git push origin v${{ github.event.inputs.release_version }}_fix${{ github.run_number }}
-    - name: Find release issue
-      id: find_issue
-      uses: actions/github-script@v3
-      with:
-        script: |
-          const { github, context } = require('@actions/github');
-          const issues = await github.issues.listForRepo({
-            ...context.repo,
-            state: 'open',
-            labels: ['release'],
-          });
-          const issue = issues.data.find(issue => issue.title.includes(`Release ${{ github.event.inputs.release_version }}`));
-          if (!issue) throw new Error('Release issue not found');
-          return issue.number;
-    - name: Get commit history
-      id: commit_history
-      run: |
-        git fetch --tags
-        git log $(git describe --tags --abbrev=0 @^)..@ --pretty=format:"%h - %s (%an)"
-    - name: Add comment to GitHub issue
-      uses: actions/github-script@v3
-      with:
-        script: |
-          const { github, context } = require('@actions/github');
-          const commitHistory = `{{ steps.commit_history.outputs }}`;
-          github.issues.createComment({
-            ...context.repo,
-            issue_number: ${{ steps.find_issue.outputs.issue_number }},
-            body: `
-              Author: ${{ github.actor }}
-              Date: ${new Date().toISOString()}
-              Commits:
-              ${commitHistory}
-              Docker image: cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.event.inputs.release_version }}_fix${{ github.run_number }}
-            `
-          });
+      - uses: actions/checkout@v3
+        with:
+          ref: release/${{ inputs.release_version }}
+      - uses: actions/setup-node@v3
+      - run: npm ci
+      - run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: release/${{ inputs.release_version }}
+      - uses: actions/setup-node@v3
+      - run: npm ci
+      - run: npm run test
+
+  create_release_hotfix_docker:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: release/${{ inputs.release_version }}
+
+      - name: Login to Yandex Container Registry
+        run: |
+          echo ${{ secrets.YC_OAUTH_TOKEN }} | docker login --username oauth --password-stdin cr.yandex
+
+      - name: Create Docker image Fix
+        run: |
+          docker build -t cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ inputs.release_version }}_fix${{ github.run_number }} .
+          docker push cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ inputs.release_version }}_fix${{ github.run_number }}
+
+      - name: Create Docker image Latest
+        run: |
+          docker build -t cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ inputs.release_version }}_latest .
+          docker push cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ inputs.release_version }}_latest
+
+  create_tag:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: release/${{ inputs.release_version }}
+
+      - name: Push tag
+        uses: EndBug/latest-tag@latest
+        with:
+          tag-name: ${{ inputs.release_version }}_fix${{ github.run_number }}
+
+  add_issue_comment:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set current date as env variable
+        run: echo "NOW=$(date +'%Y-%m-%dT%H:%M:%S')" >> $GITHUB_ENV
+
+      - name: Create comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.inputs.issue_number }}
+          body: |
+            **Fix**:
+            - Date: ${{ env.NOW }}
+            - Author: ${{ github.triggering_actor }}
+            - Version: ${{ inputs.release_version }}_fix${{ github.run_number }}
+            - Commits:
+            - YC Docker: cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ inputs.release_version }}_fix${{ github.run_number }}
