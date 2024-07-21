@@ -1,66 +1,55 @@
-name: Release
+name: Prod Release
 
 on:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release version'
+        required: true
+
+permissions:
+  contents: write
+  issues: write
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Node.js
-      uses: actions/setup-node@v2
-      with:
-        node-version: '20'
-    - run: npm install
-    - run: npm run lint
-    - run: npm test
-    - name: Build Docker image
-      run: docker build -t cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.run_number }} -t cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.run_number }}_latest .
-    - name: Push Docker image
-      run: |
-        echo ${{ secrets.YANDEX_TOKEN }} | docker login cr.yandex -u oauth --password-stdin
-        docker push cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.run_number }}
-        docker push cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.run_number }}_latest
-    - name: Create release branch
-      run: |
-        git checkout -b releases/${{ github.run_number }}
-        git push origin releases/${{ github.run_number }}
-    - name: Create release tag
-      run: |
-        git tag -a v${{ github.run_number }} -m "Release ${{ github.run_number }}"
-        git push origin v${{ github.run_number }}
-    - name: Get commit history
-      id: commit_history
-      run: |
-        git fetch --tags
-        git log $(git describe --tags --abbrev=0 @^)..@ --pretty=format:"%h - %s (%an)"
-    - name: Update CHANGELOG.md
-      id: update_changelog
-      run: |
-        echo "## Release ${{ github.run_number }} - $(date +"%Y-%m-%d")" > temp_changelog.md
-        echo "$(cat temp_changelog.md CHANGELOG.md)" > CHANGELOG.md
-        git config --global user.email "you@example.com"
-        git config --global user.name "Your Name"
-        git add CHANGELOG.md
-        git commit -m "Update CHANGELOG.md for release ${{ github.run_number }}"
-        git push origin main
-    - name: Create GitHub issue
-      uses: actions/github-script@v3
-      with:
-        script: |
-          const { github, context } = require('@actions/github');
-          const commitHistory = `{{ steps.commit_history.outputs }}`;
-          github.issues.create({
-            ...context.repo,
-            title: `Release ${{ github.run_number }}`,
-            body: `
-              Date: ${new Date().toISOString()}
-              Author: ${{ github.actor }}
-              Release version: ${{ github.run_number }}
-              Commits:
-              ${commitHistory}
-              Docker image: cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.run_number }}
-            `
-          });
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+
+      - name: Login to Yandex Container Registry
+        run: |
+          echo ${{ secrets.YC_OAUTH_TOKEN }} | docker login --username oauth --password-stdin cr.yandex
+
+      - name: Pull Docker image
+        run: |
+          docker pull cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry:${{ github.event.inputs.release_version }}_latest
+
+      - name: Set up SSH
+        run: |
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > key.pem
+          chmod 600 key.pem
+
+      - name: Deploy Docker image
+        run: |
+          ssh -i key.pem -o StrictHostKeyChecking=no admin@${{ secrets.SERVER_IP }} "
+          echo ${{ secrets.YC_OAUTH_TOKEN }} | docker login --username oauth --password-stdin cr.yandex &&
+          docker pull cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry:${{ github.event.inputs.release_version }}_latest &&
+          docker run -d -p 80:3000 cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry:${{ github.event.inputs.release_version }}_latest
+          "
+
+      - name: Create GitHub issue
+        run: |
+          touch issue_temp.txt
+          echo "**Version:** ${{ github.event.inputs.release_version }}" >> issue_temp.txt
+          echo "**Date:** $(date +'%Y-%m-%d)" >> issue_temp.txt
+          echo "**Triggering actor:** ${{ github.triggering_actor }}" >> issue_temp.txt
+          echo "**Docker image:** cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/my-first-registry:${{ github.event.inputs.release_version }}_latest" >> issue_temp.txt
+          gh issue create --title "Prod Release ${{ github.event.inputs.release_version }}" --body-file issue_temp.txt
+          rm issue_temp.txt
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
