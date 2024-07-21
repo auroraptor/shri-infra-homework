@@ -58,7 +58,7 @@ jobs:
 
       - name: Create Docker image latest
         run: |
-          docker build -t cr.yandex/${{secrets.YANDEX_REGISTRY_ID}}/my-first-registry:${{ github.run_number }}_latest .
+          docker build -t cr.yandex/${{secrets.YANДEX_REGISTRY_ID}}/my-first-registry:${{ github.run_number }}_latest .
           docker push cr.yandex/${{secrets.YANDEX_REGISTRY_ID}}/my-first-registry:${{ github.run_number }}_latest
 
   create_tag:
