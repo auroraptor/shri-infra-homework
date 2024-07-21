@@ -1,0 +1,41 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release version'
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: SSH and Deploy
+      env:
+        YANDEX_TOKEN: ${{ secrets.YANDEX_TOKEN }}
+        SERVER_IP: ${{ secrets.SERVER_IP }}
+        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      run: |
+        ssh -i <(echo "$SSH_PRIVATE_KEY") -o StrictHostKeyChecking=no admin@$SERVER_IP "
+        docker login cr.yandex -u oauth --password-stdin <<< $YANDEX_TOKEN &&
+        docker pull cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.event.inputs.release_version }}_latest &&
+        docker run -d -p 80:3000 cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.event.inputs.release_version }}_latest
+        "
+    - name: Add comment to GitHub issue
+      uses: actions/github-script@v3
+      with:
+        script: |
+          const { github, context } = require('@actions/github');
+          github.issues.createComment({
+            ...context.repo,
+            issue_number: context.issue.number,
+            body: `
+              Deployed release version: ${{ github.event.inputs.release_version }}
+              Author: ${{ github.actor }}
+              Date: ${new Date().toISOString()}
+              Docker image: cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ github.event.inputs.release_version }}_latest
+            `
+          });
