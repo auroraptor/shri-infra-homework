@@ -6,6 +6,9 @@ on:
       release_version:
         description: 'Release version'
         required: true
+      issue_number:
+        description: 'Issue number'
+        required: true
 
 permissions:
   contents: write
@@ -17,8 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          ref: release/${{ inputs.release_version }}
+          ref: refs/heads/release/${{ inputs.release_version }}
       - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
       - run: npm ci
       - run: npm run lint
 
@@ -27,8 +32,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          ref: release/${{ inputs.release_version }}
+          ref: refs/heads/release/${{ inputs.release_version }}
       - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
       - run: npm ci
       - run: npm run test
 
@@ -38,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          ref: release/${{ inputs.release_version }}
+          ref: refs/heads/release/${{ inputs.release_version }}
 
       - name: Login to Yandex Container Registry
         run: |
@@ -60,7 +67,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          ref: release/${{ inputs.release_version }}
+          ref: refs/heads/release/${{ inputs.release_version }}
 
       - name: Push tag
         uses: EndBug/latest-tag@latest
