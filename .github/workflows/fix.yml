@@ -6,46 +6,40 @@ on:
       release_version:
         description: 'Release version'
         required: true
-      issue_number:
-        description: 'Issue number'
-        required: true
 
 permissions:
   contents: write
   issues: write
 
 jobs:
-  lint:
+  prepare:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-        with:
-          ref: refs/heads/release/${{ inputs.release_version }}
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '20'
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+      - run: |
+          echo "Preparing environment"
+          git fetch --all
+          if git show-ref --verify --quiet refs/heads/release/${{ inputs.release_version }}; then
+            echo "Branch release/${{ inputs.release_version }} exists"
+            git checkout release/${{ inputs.release_version }}
+          else
+            echo "Branch release/${{ inputs.release_version }} does not exist. Creating it from main."
+            git checkout -b release/${{ inputs.release_version }} origin/main
+            git push origin release/${{ inputs.release_version }}
+          fi
       - run: npm ci
       - run: npm run lint
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          ref: refs/heads/release/${{ inputs.release_version }}
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '20'
-      - run: npm ci
       - run: npm run test
 
   create_release_hotfix_docker:
-    needs: [lint, test]
+    needs: prepare
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
         with:
-          ref: refs/heads/release/${{ inputs.release_version }}
+          ref: release/${{ inputs.release_version }}
 
       - name: Login to Yandex Container Registry
         run: |
@@ -62,12 +56,12 @@ jobs:
           docker push cr.yandex/${{ secrets.YANDEX_REGISTRY_ID }}/app:${{ inputs.release_version }}_latest
 
   create_tag:
-    needs: [lint, test]
+    needs: create_release_hotfix_docker
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
         with:
-          ref: refs/heads/release/${{ inputs.release_version }}
+          ref: release/${{ inputs.release_version }}
 
       - name: Push tag
         uses: EndBug/latest-tag@latest
@@ -75,7 +69,7 @@ jobs:
           tag-name: ${{ inputs.release_version }}_fix${{ github.run_number }}
 
   add_issue_comment:
-    needs: [lint, test]
+    needs: create_tag
     runs-on: ubuntu-latest
     steps:
       - name: Set current date as env variable
